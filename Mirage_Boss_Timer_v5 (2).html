@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mirage Boss Timer</title>
+<style>
+body{font-family:Arial;background:#0f172a;color:#fff;margin:0;padding:20px}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #334155;padding:8px}
+input{margin:4px;padding:6px}.btn{padding:8px 12px}
+</style></head><body>
+<h1>🐉 Mirage Boss Spawn Timer</h1>
+<input id=b placeholder="Boss"><input id=w placeholder="World"><input id=l placeholder="Location"><input id=t placeholder="2:00 (auto AM/PM)">
+<button class=btn onclick="add()">Add Boss</button>
+<table><thead><tr><th>Boss</th><th>World</th><th>Location</th><th>Next</th><th>Countdown</th><th>Action</th></tr></thead><tbody id=tb></tbody></table>
+<script>
+let bosses=JSON.parse(localStorage.getItem('bosses')||'[]');
+function save(){localStorage.setItem('bosses',JSON.stringify(bosses))}
+function render(){tb.innerHTML='';bosses.forEach((x,i)=>{let r=tb.insertRow();r.dataset.times=x.times;
+r.innerHTML=`<td>${x.b}</td><td>${x.w}</td><td>${x.l}</td><td class=next></td><td class=cd></td><td><a href="#" onclick="editBoss(${i});return false;">Edit</a> | <a href="#" onclick="del(${i});return false;">Delete</a></td>`});update();}
+
+function add(){
+ let vals=t.value.split(',').flatMap(v=>{
+  v=v.trim();
+  if(/am|pm/i.test(v)) return [v];
+  return [v+' AM',v+' PM'];
+ });
+ bosses.push({b:b.value,w:w.value,l:l.value,times:vals.join(',')});
+ save();render();b.value=w.value=l.value=t.value='';
+}
+
+
+function editBoss(i){
+ let x=bosses[i];
+ let nb=prompt('Boss',x.b); if(nb===null)return;
+ let nw=prompt('World',x.w); if(nw===null)return;
+ let nl=prompt('Location',x.l); if(nl===null)return;
+ let nt=prompt('Spawn Times',x.times); if(nt===null)return;
+ bosses[i]={b:nb,w:nw,l:nl,times:nt};
+ save();render();
+}
+
+function del(i){bosses.splice(i,1);save();render();}
+function update(){let now=new Date();
+let rows=[...document.querySelectorAll('#tb tr')];
+rows.forEach(r=>{let ts=r.dataset.times.split(',');let n=null;for(let tm of ts){let[h,m]=tm.split(':');let d=new Date();d.setHours(+h,+m,0,0);if(d>now){n=d;break}}if(!n){let[h,m]=ts[0].split(':');n=new Date();n.setDate(n.getDate()+1);n.setHours(+h,+m,0,0)}let diff=n-now,H=Math.floor(diff/36e5),M=Math.floor(diff%36e5/6e4),S=Math.floor(diff%6e4/1e3);r.querySelector('.next').textContent=n.toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});r.querySelector('.cd').textContent=`${String(H).padStart(2,'0')}:${String(M).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
+r.dataset.diff=diff;});
+rows.sort((a,b)=>a.dataset.diff-b.dataset.diff);
+rows.forEach(r=>tb.appendChild(r));}
+render();setInterval(update,1000);
+</script></body></html>
