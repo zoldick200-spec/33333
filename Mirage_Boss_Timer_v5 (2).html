@@ -144,7 +144,10 @@
             border-radius: 8px;
             border: 1px solid var(--border-color);
         }
-
+        <input 
+id="search" 
+placeholder="🔍 Search boss, world, location..."
+oninput="searchBoss()">
         table {
             width: 100%;
             border-collapse: collapse;
@@ -227,10 +230,7 @@
             color: var(--text-muted);
             margin-top: 4px;
         }
-        <input 
-id="search" 
-placeholder="🔍 Search boss, world, location..."
-oninput="searchBoss()">
+
     </style>
 </head>
 <body>
