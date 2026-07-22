@@ -207,6 +207,7 @@
 
         .cd.due {
             color: var(--danger);
+            animation: pulse 0.5s infinite alternate;
         }
 
         @keyframes pulse {
@@ -538,30 +539,38 @@ function update() {
             return;
         }
 
-        let nextSpawn = dates.find(d => d > now);
+        const gracePeriodMs = 60000;
+        let targetSpawn = dates.find(d => (d - now) > -gracePeriodMs);
 
-        if (!nextSpawn) {
-            nextSpawn = new Date(dates[0]);
-            nextSpawn.setDate(nextSpawn.getDate() + 1);
+        if (!targetSpawn) {
+            targetSpawn = new Date(dates[0]);
+            targetSpawn.setDate(targetSpawn.getDate() + 1);
         }
 
-        let diff = nextSpawn - now;
-        let H = Math.floor(diff / 36e5);
-        let M = Math.floor((diff % 36e5) / 6e4);
-        let S = Math.floor((diff % 6e4) / 1e3);
-
+        let diff = targetSpawn - now;
         const cdEl = r.querySelector('.cd');
-        cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
-        
-        if (diff <= 300000 && diff > 0) {
-            cdEl.className = 'cd imminent';
-        } else if (diff <= 0) {
+
+        if (diff <= 0 && diff >= -gracePeriodMs) {
+            let absDiff = Math.abs(diff);
+            let M = Math.floor(absDiff / 6e4);
+            let S = Math.floor((absDiff % 6e4) / 1e3);
+            cdEl.textContent = `-${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
             cdEl.className = 'cd due';
         } else {
-            cdEl.className = 'cd';
+            let H = Math.floor(diff / 36e5);
+            let M = Math.floor((diff % 36e5) / 6e4);
+            let S = Math.floor((diff % 6e4) / 1e3);
+
+            cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
+            
+            if (diff <= 300000 && diff > 0) {
+                cdEl.className = 'cd imminent';
+            } else {
+                cdEl.className = 'cd';
+            }
         }
 
-        r.querySelector('.next').textContent = nextSpawn.toLocaleTimeString([], {
+        r.querySelector('.next').textContent = targetSpawn.toLocaleTimeString([], {
             hour: 'numeric',
             minute: '2-digit',
             second: '2-digit',
