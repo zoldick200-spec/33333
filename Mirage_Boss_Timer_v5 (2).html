@@ -573,8 +573,6 @@ function update() {
 
     const tb = document.getElementById('tb');
     
-    // Primary sort: Uncompleted first, completed last.
-    // Secondary sort: Shortest remaining countdown time.
     rows.sort((a, b) => {
         let aDone = bosses[a.dataset.index]?.done ? 1 : 0;
         let bDone = bosses[b.dataset.index]?.done ? 1 : 0;
