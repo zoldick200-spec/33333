@@ -179,7 +179,7 @@
         }
 
         tr.completed {
-            opacity: 0.5;
+            opacity: 0.4;
         }
 
         .checkbox-cell {
@@ -412,6 +412,7 @@ function toggleDone(index, isChecked) {
         if (isChecked) row.classList.add('completed');
         else row.classList.remove('completed');
     }
+    update();
 }
 
 function searchBoss() {
@@ -571,7 +572,19 @@ function update() {
     });
 
     const tb = document.getElementById('tb');
-    rows.sort((a, b) => Number(a.dataset.diff) - Number(b.dataset.diff));
+    
+    // Primary sort: Uncompleted first, completed last.
+    // Secondary sort: Shortest remaining countdown time.
+    rows.sort((a, b) => {
+        let aDone = bosses[a.dataset.index]?.done ? 1 : 0;
+        let bDone = bosses[b.dataset.index]?.done ? 1 : 0;
+
+        if (aDone !== bDone) {
+            return aDone - bDone;
+        }
+        return Number(a.dataset.diff) - Number(b.dataset.diff);
+    });
+
     rows.forEach(r => tb.appendChild(r));
 }
 
