@@ -34,7 +34,7 @@
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1100px;
             margin: 0 auto;
         }
 
@@ -86,7 +86,7 @@
             font-weight: 600;
         }
 
-        input {
+        input, select {
             background-color: #0f172a;
             border: 1px solid var(--border-color);
             color: #fff;
@@ -98,7 +98,7 @@
             width: 100%;
         }
 
-        input:focus {
+        input:focus, select:focus {
             border-color: var(--accent);
         }
 
@@ -143,6 +143,16 @@
         .btn-secondary:hover {
             background-color: #334155;
             color: #fff;
+        }
+
+        .btn-audio {
+            background-color: #334155;
+            color: #fff;
+        }
+
+        .btn-audio.active {
+            background-color: var(--success);
+            color: #0f172a;
         }
 
         .table-container {
@@ -216,9 +226,39 @@
             100% { opacity: 1; }
         }
 
+        .alarm-toggle {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1.25rem;
+            opacity: 0.35;
+            transition: opacity 0.2s, transform 0.1s;
+            padding: 4px;
+        }
+
+        .alarm-toggle.active {
+            opacity: 1;
+            transform: scale(1.15);
+        }
+
+        .alarm-settings-cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .alarm-select {
+            padding: 4px 6px;
+            font-size: 0.75rem;
+            width: auto;
+            border-radius: 4px;
+        }
+
         .actions {
             display: flex;
             gap: 8px;
+            align-items: center;
         }
 
         .action-btn {
@@ -281,7 +321,7 @@
                 </div>
             </div>
             <div class="btn-group">
-                <!-- Hidden file input for uploading backup -->
+                <button type="button" id="audioToggle" class="btn btn-audio" onclick="toggleGlobalAudio()">🔊 Sound: OFF</button>
                 <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="importFromFile(event)">
                 <button type="button" class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">📁 Load File</button>
                 <button type="button" class="btn btn-secondary" onclick="exportToFile()">💾 Save File</button>
@@ -299,6 +339,7 @@
             <thead>
                 <tr>
                     <th style="text-align: center;">Done</th>
+                    <th style="text-align: center;">Alarm</th>
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
@@ -316,9 +357,45 @@
 
 <script>
 let bosses = JSON.parse(localStorage.getItem('bosses') || '[]');
+let audioEnabled = false;
+let audioCtx = null;
+let triggeredAlarms = {};
 
 function save() {
     localStorage.setItem('bosses', JSON.stringify(bosses));
+}
+
+function toggleGlobalAudio() {
+    audioEnabled = !audioEnabled;
+    const btn = document.getElementById('audioToggle');
+    if (audioEnabled) {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        btn.textContent = "🔊 Sound: ON";
+        btn.classList.add('active');
+        playBeep();
+    } else {
+        btn.textContent = "🔊 Sound: OFF";
+        btn.classList.remove('active');
+    }
+}
+
+function playBeep() {
+    if (!audioEnabled || !audioCtx) return;
+    try {
+        let osc = audioCtx.createOscillator();
+        let gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 1.2);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 1.2);
+    } catch (e) {
+        console.error("Audio error:", e);
+    }
 }
 
 function getLastResetTimestamp() {
@@ -371,7 +448,7 @@ function render() {
     tb.innerHTML = '';
 
     if (bosses.length === 0) {
-        tb.innerHTML = `<tr><td colspan="7" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="8" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
         return;
     }
 
@@ -388,9 +465,29 @@ function render() {
         r.dataset.times = x.times;
         if (x.done) r.classList.add('completed');
 
+        let isAlarmActive = x.alarmEnabled !== false;
+        let alarmLeadMin = x.alarmLead !== undefined ? x.alarmLead : 0;
+
         r.innerHTML = `
             <td class="checkbox-cell">
                 <input type="checkbox" ${x.done ? 'checked' : ''} onchange="toggleDone(${i}, this.checked)">
+            </td>
+            <td class="checkbox-cell">
+                <div class="alarm-settings-cell">
+                    <button class="alarm-toggle ${isAlarmActive ? 'active' : ''}" 
+                            title="${isAlarmActive ? 'Disable alarm' : 'Enable alarm'}" 
+                            onclick="toggleBossAlarm(${i})">
+                        ${isAlarmActive ? '🔔' : '🔕'}
+                    </button>
+                    ${isAlarmActive ? `
+                        <select class="alarm-select" onchange="changeAlarmLead(${i}, this.value)" title="Alert lead time">
+                            <option value="0" ${alarmLeadMin === 0 ? 'selected' : ''}>At Spawn</option>
+                            <option value="2" ${alarmLeadMin === 2 ? 'selected' : ''}>2m Before</option>
+                            <option value="5" ${alarmLeadMin === 5 ? 'selected' : ''}>5m Before</option>
+                            <option value="10" ${alarmLeadMin === 10 ? 'selected' : ''}>10m Before</option>
+                        </select>
+                    ` : ''}
+                </div>
             </td>
             <td><strong>${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
@@ -422,6 +519,19 @@ function toggleDone(index, isChecked) {
     update();
 }
 
+function toggleBossAlarm(index) {
+    let currentState = bosses[index].alarmEnabled !== false;
+    bosses[index].alarmEnabled = !currentState;
+    save();
+    render();
+}
+
+function changeAlarmLead(index, value) {
+    bosses[index].alarmLead = parseInt(value, 10);
+    save();
+    update();
+}
+
 function searchBoss() {
     let q = document.getElementById('search').value.toLowerCase();
     let rows = document.querySelectorAll('#tb tr');
@@ -448,6 +558,8 @@ function addBoss(e) {
         l: lInput.value.trim(),
         times: tInput.value.trim(),
         done: false,
+        alarmEnabled: true,
+        alarmLead: 0,
         lastChecked: null
     });
 
@@ -524,17 +636,40 @@ function importFromFile(event) {
                     event.target.value = '';
                     return;
                 }
-                bosses = parsed;
+                
+                const lastReset = getLastResetTimestamp();
+
+                bosses = parsed.map(item => {
+                    let isDone = !!item.done;
+                    let lastCheckedTime = item.lastChecked || null;
+
+                    if (isDone && lastCheckedTime && lastCheckedTime < lastReset) {
+                        isDone = false;
+                        lastCheckedTime = null;
+                    }
+
+                    return {
+                        b: item.b || '',
+                        w: item.w || '',
+                        l: item.l || '',
+                        times: item.times || '',
+                        done: isDone,
+                        alarmEnabled: item.alarmEnabled !== false,
+                        alarmLead: item.alarmLead || 0,
+                        lastChecked: lastCheckedTime
+                    };
+                });
+
                 save();
                 render();
-                alert("Boss list uploaded and loaded successfully!");
+                alert("Boss list loaded successfully!");
             } else {
                 alert("Invalid JSON format. File must contain an array of boss data.");
             }
         } catch (err) {
             alert("Failed to parse JSON file: " + err.message);
         }
-        event.target.value = ''; // Reset input to allow re-uploading the same file if needed
+        event.target.value = '';
     };
     reader.readAsText(file);
 }
@@ -545,6 +680,8 @@ function update() {
     let rowData = [];
 
     rows.forEach(r => {
+        let index = r.dataset.index;
+        let boss = bosses[index];
         let rawTimes = r.dataset.times.split(',');
         
         let dates = rawTimes
@@ -555,7 +692,7 @@ function update() {
         if (dates.length === 0) {
             r.querySelector('.next').textContent = 'Invalid Time';
             r.querySelector('.cd').textContent = '--:--:--';
-            rowData.push({ row: r, diff: Infinity, done: bosses[r.dataset.index]?.done });
+            rowData.push({ row: r, diff: Infinity, done: boss?.done });
             return;
         }
 
@@ -569,6 +706,20 @@ function update() {
 
         let diff = targetSpawn - now;
         const cdEl = r.querySelector('.cd');
+
+        // ALARM SYSTEM TRIGGER
+        let isAlarmActive = boss.alarmEnabled !== false;
+        let leadMs = (boss.alarmLead || 0) * 60 * 1000;
+        let alarmTriggerTimeThreshold = diff - leadMs;
+        let alarmKey = `${boss.b}_${targetSpawn.getTime()}_${leadMs}`;
+
+        if (isAlarmActive && !boss.done && alarmTriggerTimeThreshold <= 0 && diff >= -gracePeriodMs) {
+            if (!triggeredAlarms[alarmKey]) {
+                playBeep();
+                document.title = `🚨 ${boss.b} ${leadMs > 0 ? 'spawning soon!' : 'Spawning!'}`;
+                triggeredAlarms[alarmKey] = true;
+            }
+        }
 
         if (diff <= 0 && diff >= -gracePeriodMs) {
             let absDiff = Math.abs(diff);
@@ -600,7 +751,7 @@ function update() {
         rowData.push({
             row: r,
             diff: diff,
-            done: bosses[r.dataset.index]?.done ? 1 : 0
+            done: boss?.done ? 1 : 0
         });
     });
 
