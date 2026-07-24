@@ -17,6 +17,8 @@
             --danger-hover: #dc2626;
             --warning: #f59e0b;
             --success: #10b981;
+            --spawned-bg: rgba(245, 158, 11, 0.15);
+            --spawned-border: #f59e0b;
         }
 
         * {
@@ -193,6 +195,34 @@
             opacity: 0.4;
         }
 
+        /* SPAWNED HIGHLIGHT STYLE (5 MINUTES) */
+        tr.spawned-highlight {
+            background-color: var(--spawned-bg) !important;
+            animation: spawnPulse 2s infinite alternate;
+        }
+
+        tr.spawned-highlight td {
+            border-bottom: 1px solid var(--spawned-border);
+        }
+
+        @keyframes spawnPulse {
+            0% { background-color: rgba(245, 158, 11, 0.1); }
+            100% { background-color: rgba(245, 158, 11, 0.35); }
+        }
+
+        .spawn-badge {
+            display: inline-block;
+            background-color: var(--warning);
+            color: #0f172a;
+            font-weight: bold;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
         .checkbox-cell {
             text-align: center;
         }
@@ -218,7 +248,7 @@
 
         .cd.due {
             color: var(--danger);
-            animation: pulse 0.5s infinite alternate;
+            font-size: 1.15rem;
         }
 
         @keyframes pulse {
@@ -489,7 +519,7 @@ function render() {
                     ` : ''}
                 </div>
             </td>
-            <td><strong>${escapeHtml(x.b)}</strong></td>
+            <td><strong class="boss-name">${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
             <td class="next">-</td>
@@ -679,6 +709,8 @@ function update() {
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
     let rowData = [];
 
+    const fiveMinutesMs = 5 * 60 * 1000;
+
     rows.forEach(r => {
         let index = r.dataset.index;
         let boss = bosses[index];
@@ -696,8 +728,8 @@ function update() {
             return;
         }
 
-        const gracePeriodMs = 60000;
-        let targetSpawn = dates.find(d => (d - now) > -gracePeriodMs);
+        // Target next spawn considering the 5 minute spawn window
+        let targetSpawn = dates.find(d => (d - now) > -fiveMinutesMs);
 
         if (!targetSpawn) {
             targetSpawn = new Date(dates[0]);
@@ -706,6 +738,7 @@ function update() {
 
         let diff = targetSpawn - now;
         const cdEl = r.querySelector('.cd');
+        const nameEl = r.querySelector('.boss-name');
 
         // ALARM SYSTEM TRIGGER
         let isAlarmActive = boss.alarmEnabled !== false;
@@ -713,7 +746,7 @@ function update() {
         let alarmTriggerTimeThreshold = diff - leadMs;
         let alarmKey = `${boss.b}_${targetSpawn.getTime()}_${leadMs}`;
 
-        if (isAlarmActive && !boss.done && alarmTriggerTimeThreshold <= 0 && diff >= -gracePeriodMs) {
+        if (isAlarmActive && !boss.done && alarmTriggerTimeThreshold <= 0 && diff >= -fiveMinutesMs) {
             if (!triggeredAlarms[alarmKey]) {
                 playBeep();
                 document.title = `🚨 ${boss.b} ${leadMs > 0 ? 'spawning soon!' : 'Spawning!'}`;
@@ -721,13 +754,27 @@ function update() {
             }
         }
 
-        if (diff <= 0 && diff >= -gracePeriodMs) {
+        // SPAWNED STATE (0 to 5 MINUTES AFTER SPAWN)
+        if (diff <= 0 && diff >= -fiveMinutesMs) {
+            r.classList.add('spawned-highlight');
+            if (!r.querySelector('.spawn-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'spawn-badge';
+                badge.textContent = '⚡ SPAWNED!';
+                nameEl.appendChild(badge);
+            }
+
             let absDiff = Math.abs(diff);
             let M = Math.floor(absDiff / 6e4);
             let S = Math.floor((absDiff % 6e4) / 1e3);
             cdEl.textContent = `-${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
             cdEl.className = 'cd due';
         } else {
+            // NORMAL COUNTDOWN STATE (> 5 MINS PASSED OR PRE-SPAWN)
+            r.classList.remove('spawned-highlight');
+            let badge = r.querySelector('.spawn-badge');
+            if (badge) badge.remove();
+
             let H = Math.floor(diff / 36e5);
             let M = Math.floor((diff % 36e5) / 6e4);
             let S = Math.floor((diff % 6e4) / 1e3);
