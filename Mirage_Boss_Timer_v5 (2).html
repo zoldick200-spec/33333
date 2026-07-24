@@ -63,7 +63,7 @@
             border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 20px;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
         }
 
@@ -95,17 +95,21 @@
             font-size: 0.95rem;
             outline: none;
             transition: border-color 0.2s;
+            width: 100%;
         }
 
         input:focus {
             border-color: var(--accent);
         }
 
+        .search-bar {
+            margin-bottom: 16px;
+        }
+
         .btn-group {
             display: flex;
             gap: 10px;
             justify-content: flex-end;
-            flex-wrap: wrap;
         }
 
         .btn {
@@ -174,6 +178,21 @@
             background-color: rgba(255, 255, 255, 0.02);
         }
 
+        tr.completed {
+            opacity: 0.4;
+        }
+
+        .checkbox-cell {
+            text-align: center;
+        }
+
+        .checkbox-cell input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--success);
+        }
+
         .cd {
             font-family: monospace;
             font-size: 1.1rem;
@@ -188,6 +207,7 @@
 
         .cd.due {
             color: var(--danger);
+            animation: pulse 0.5s infinite alternate;
         }
 
         @keyframes pulse {
@@ -222,6 +242,13 @@
             padding: 32px;
             color: var(--text-muted);
         }
+
+        .reset-info {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: right;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -249,24 +276,25 @@
                 </div>
                 <div class="form-group">
                     <label for="t">Spawn Times (Comma separated)</label>
-                    <input id="t" placeholder="e.g. 2:00 PM, 20:00, 8:00" required>
+                    <input id="t" placeholder="e.g. 2:00 PM, 8:00 PM" required>
                 </div>
             </div>
             <div class="btn-group">
-                <!-- Hidden file input triggered by button -->
-                <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importFromFile(event)">
-                
-                <button type="button" class="btn btn-secondary" onclick="document.getElementById('importFile').click()">Load File</button>
-                <button type="button" class="btn btn-secondary" onclick="exportToFile()">Backup File</button>
+                <button type="button" class="btn btn-secondary" onclick="exportImportModal()">Backup / Load</button>
                 <button type="submit" class="btn">Add Boss</button>
             </div>
         </form>
+    </div>
+
+    <div class="search-bar">
+        <input id="search" placeholder="🔍 Search boss, world, location..." oninput="searchBoss()">
     </div>
 
     <div class="table-container">
         <table>
             <thead>
                 <tr>
+                    <th style="text-align: center;">Done</th>
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
@@ -279,6 +307,7 @@
             </tbody>
         </table>
     </div>
+    <div class="reset-info">💡 Checkbox auto-resets every Sunday at 11:00 PM GMT+8</div>
 </div>
 
 <script>
@@ -288,29 +317,43 @@ function save() {
     localStorage.setItem('bosses', JSON.stringify(bosses));
 }
 
-function escapeHtml(str) {
-    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function getLastResetTimestamp() {
+    let now = new Date();
+    let utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+    let gmt8Date = new Date(utcMs + (8 * 3600000));
+    
+    let day = gmt8Date.getDay();
+    let hours = gmt8Date.getHours();
+    
+    let daysToSubtract = day;
+    if (day === 0 && hours < 23) {
+        daysToSubtract = 7;
+    }
+    
+    let lastResetGMT8 = new Date(gmt8Date);
+    lastResetGMT8.setDate(gmt8Date.getDate() - daysToSubtract);
+    lastResetGMT8.setHours(23, 0, 0, 0);
+    
+    return lastResetGMT8.getTime() - (8 * 3600000) - (now.getTimezoneOffset() * 60000);
 }
 
-// Flexible Time Parser
 function parseTimeToToday(timeStr) {
     if (!timeStr) return null;
-    let match = timeStr.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    let match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
     if (!match) return null;
 
     let [, hoursStr, minutesStr, period] = match;
     let hours = parseInt(hoursStr, 10);
-    let minutes = minutesStr ? parseInt(minutesStr, 10) : 0;
+    let minutes = parseInt(minutesStr, 10);
 
-    if (isNaN(hours) || isNaN(minutes) || minutes < 0 || minutes > 59) return null;
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        return null;
+    }
 
     if (period) {
         period = period.toUpperCase();
-        if (hours < 1 || hours > 12) return null;
         if (period === 'PM' && hours < 12) hours += 12;
         if (period === 'AM' && hours === 12) hours = 0;
-    } else {
-        if (hours < 0 || hours > 23) return null;
     }
 
     let d = new Date();
@@ -323,15 +366,27 @@ function render() {
     tb.innerHTML = '';
 
     if (bosses.length === 0) {
-        tb.innerHTML = `<tr><td colspan="6" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="7" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
         return;
     }
 
+    const lastReset = getLastResetTimestamp();
+
     bosses.forEach((x, i) => {
+        if (x.done && x.lastChecked && x.lastChecked < lastReset) {
+            x.done = false;
+            x.lastChecked = null;
+        }
+
         let r = tb.insertRow();
         r.dataset.index = i;
         r.dataset.times = x.times;
+        if (x.done) r.classList.add('completed');
+
         r.innerHTML = `
+            <td class="checkbox-cell">
+                <input type="checkbox" ${x.done ? 'checked' : ''} onchange="toggleDone(${i}, this.checked)">
+            </td>
             <td><strong>${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
@@ -343,7 +398,35 @@ function render() {
             </td>
         `;
     });
+    
+    save();
     update();
+}
+
+function toggleDone(index, isChecked) {
+    bosses[index].done = isChecked;
+    bosses[index].lastChecked = isChecked ? Date.now() : null;
+    save();
+    
+    let row = document.querySelector(`#tb tr[data-index="${index}"]`);
+    if (row) {
+        if (isChecked) row.classList.add('completed');
+        else row.classList.remove('completed');
+    }
+    update();
+}
+
+function searchBoss() {
+    let q = document.getElementById('search').value.toLowerCase();
+    let rows = document.querySelectorAll('#tb tr');
+    rows.forEach(r => {
+        let text = r.textContent.toLowerCase();
+        r.style.display = text.includes(q) ? '' : 'none';
+    });
+}
+
+function escapeHtml(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function addBoss(e) {
@@ -353,21 +436,36 @@ function addBoss(e) {
     const lInput = document.getElementById('l');
     const tInput = document.getElementById('t');
 
+    let rawVals = tInput.value.split(',');
+    let vals = [];
+
+    rawVals.forEach(v => {
+        v = v.trim();
+        if (!v) return;
+        if (/am|pm/i.test(v)) {
+            vals.push(v);
+        } else {
+            vals.push(v + ' AM');
+            vals.push(v + ' PM');
+        }
+    });
+
     bosses.push({
         b: bInput.value.trim(),
         w: wInput.value.trim(),
         l: lInput.value.trim(),
-        times: tInput.value.trim()
+        times: vals.join(', '),
+        done: false,
+        lastChecked: null
     });
 
     save();
+    render();
 
     bInput.value = '';
     wInput.value = '';
     lInput.value = '';
     tInput.value = '';
-
-    render();
 }
 
 function editBoss(i) {
@@ -377,7 +475,13 @@ function editBoss(i) {
     let nl = prompt('Location:', x.l); if (nl === null) return;
     let nt = prompt('Spawn Times (comma-separated):', x.times); if (nt === null) return;
 
-    bosses[i] = { b: nb.trim(), w: nw.trim(), l: nl.trim(), times: nt.trim() };
+    bosses[i] = { 
+        ...bosses[i], 
+        b: nb.trim(), 
+        w: nw.trim(), 
+        l: nl.trim(), 
+        times: nt.trim() 
+    };
     save();
     render();
 }
@@ -390,51 +494,35 @@ function delBoss(i) {
     }
 }
 
-// Export data as a downloadable JSON file
-function exportToFile() {
-    if (bosses.length === 0) {
-        alert("No boss data to export!");
-        return;
-    }
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bosses, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `mirage_bosses_${new Date().toISOString().slice(0,10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-}
+function exportImportModal() {
+    let action = prompt("Type 'export' to copy data JSON or 'import' to paste data JSON:", "export");
+    if (!action) return;
 
-// Import data from a selected .json file
-function importFromFile(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const parsed = JSON.parse(e.target.result);
-            if (Array.isArray(parsed)) {
-                bosses = parsed;
-                save();
-                render();
-                alert("Boss list imported successfully!");
-            } else {
-                alert("Invalid file format. Expected a JSON list of bosses.");
+    if (action.toLowerCase() === 'export') {
+        prompt("Copy your backup data:", JSON.stringify(bosses));
+    } else if (action.toLowerCase() === 'import') {
+        let jsonStr = prompt("Paste your backup JSON:");
+        if (jsonStr) {
+            try {
+                let parsed = JSON.parse(jsonStr);
+                if (Array.isArray(parsed)) {
+                    bosses = parsed;
+                    save();
+                    render();
+                    alert("Boss list imported successfully!");
+                } else {
+                    alert("Invalid data format.");
+                }
+            } catch (err) {
+                alert("Failed to parse JSON: " + err.message);
             }
-        } catch (err) {
-            alert("Error parsing JSON file: " + err.message);
         }
-        event.target.value = '';
-    };
-    reader.readAsText(file);
+    }
 }
 
 function update() {
     let now = new Date();
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
-
-    let rowData = [];
 
     rows.forEach(r => {
         let rawTimes = r.dataset.times.split(',');
@@ -447,61 +535,69 @@ function update() {
         if (dates.length === 0) {
             r.querySelector('.next').textContent = 'Invalid Time';
             r.querySelector('.cd').textContent = '--:--:--';
-            rowData.push({ row: r, diff: Infinity });
+            r.dataset.diff = 999999999999;
             return;
         }
 
-        let nextSpawn = dates.find(d => d > now);
+        const gracePeriodMs = 60000;
+        let targetSpawn = dates.find(d => (d - now) > -gracePeriodMs);
 
-        if (!nextSpawn) {
-            nextSpawn = new Date(dates[0]);
-            nextSpawn.setDate(nextSpawn.getDate() + 1);
+        if (!targetSpawn) {
+            targetSpawn = new Date(dates[0]);
+            targetSpawn.setDate(targetSpawn.getDate() + 1);
         }
 
-        let diff = nextSpawn - now;
-        let H = Math.floor(diff / 36e5);
-        let M = Math.floor((diff % 36e5) / 6e4);
-        let S = Math.floor((diff % 6e4) / 1e3);
-
+        let diff = targetSpawn - now;
         const cdEl = r.querySelector('.cd');
-        cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
-        
-        if (diff <= 300000 && diff > 0) {
-            cdEl.className = 'cd imminent';
-        } else if (diff <= 0) {
+
+        if (diff <= 0 && diff >= -gracePeriodMs) {
+            let absDiff = Math.abs(diff);
+            let M = Math.floor(absDiff / 6e4);
+            let S = Math.floor((absDiff % 6e4) / 1e3);
+            cdEl.textContent = `-${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
             cdEl.className = 'cd due';
         } else {
-            cdEl.className = 'cd';
+            let H = Math.floor(diff / 36e5);
+            let M = Math.floor((diff % 36e5) / 6e4);
+            let S = Math.floor((diff % 6e4) / 1e3);
+
+            cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
+            
+            if (diff <= 300000 && diff > 0) {
+                cdEl.className = 'cd imminent';
+            } else {
+                cdEl.className = 'cd';
+            }
         }
 
-        r.querySelector('.next').textContent = nextSpawn.toLocaleTimeString([], {
+        r.querySelector('.next').textContent = targetSpawn.toLocaleTimeString([], {
             hour: 'numeric',
             minute: '2-digit',
             second: '2-digit',
             hour12: true
         });
 
-        rowData.push({ row: r, diff: diff });
+        r.dataset.diff = diff;
     });
 
-    // Check if table reordering is actually required before altering DOM
-    let needsReorder = false;
-    for (let i = 0; i < rowData.length - 1; i++) {
-        if (rowData[i].diff > rowData[i + 1].diff) {
-            needsReorder = true;
-            break;
-        }
-    }
+    const tb = document.getElementById('tb');
+    
+    rows.sort((a, b) => {
+        let aDone = bosses[a.dataset.index]?.done ? 1 : 0;
+        let bDone = bosses[b.dataset.index]?.done ? 1 : 0;
 
-    if (needsReorder) {
-        const tb = document.getElementById('tb');
-        rowData.sort((a, b) => a.diff - b.diff);
-        rowData.forEach(item => tb.appendChild(item.row));
-    }
+        if (aDone !== bDone) {
+            return aDone - bDone;
+        }
+        return Number(a.dataset.diff) - Number(b.dataset.diff);
+    });
+
+    rows.forEach(r => tb.appendChild(r));
 }
 
 render();
 setInterval(update, 1000);
 </script>
+
 </body>
 </html>
