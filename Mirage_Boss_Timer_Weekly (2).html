@@ -36,7 +36,7 @@
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1100px;
             margin: 0 auto;
         }
 
@@ -195,6 +195,23 @@
             accent-color: var(--success);
         }
 
+        .schedule-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .time-badge {
+            background-color: #0f172a;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
         .cd {
             font-family: monospace;
             font-size: 1.1rem;
@@ -299,6 +316,7 @@
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
+                    <th>All Spawn Times</th>
                     <th>Next Spawn</th>
                     <th>Countdown</th>
                     <th>Actions</th>
@@ -394,7 +412,7 @@ function render() {
     tb.innerHTML = '';
 
     if (bosses.length === 0) {
-        tb.innerHTML = `<tr><td colspan="7" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="8" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
         return;
     }
 
@@ -411,6 +429,14 @@ function render() {
                 .eq('id', x.id);
         }
 
+        // Format spawn times into visual badges
+        const timesBadges = (x.times || '')
+            .split(',')
+            .map(t => t.trim())
+            .filter(Boolean)
+            .map(t => `<span class="time-badge">${escapeHtml(t)}</span>`)
+            .join('');
+
         let r = tb.insertRow();
         r.dataset.index = i;
         r.dataset.times = x.times;
@@ -423,6 +449,7 @@ function render() {
             <td><strong>${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
+            <td><div class="schedule-tags">${timesBadges || '-'}</div></td>
             <td class="next">-</td>
             <td class="cd">-</td>
             <td class="actions">
