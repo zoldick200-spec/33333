@@ -101,7 +101,7 @@
 
     <div class="nav-container">
       <!-- Edit the href URL below to redirect where you want -->
-      <a href="https://zoldick200-spec.github.io/33333/Mirage_Boss_Timer_v5%20(2).html" class="nav-link">MIRAGE WEEKLYBOSS</a>
+      <a href="https://zoldick200-spec.github.io/33333/Mirage_Boss_Timer_Weekly%20(2).html" class="nav-link">MIRAGE WEEKLYBOSS</a>
 
       <!-- Edit the href URL below to redirect where you want -->
       <a href="https://zoldick200-spec.github.io/33333/ms11frenzy.html" class="nav-link secondary">MAGIC SQUARE FRENZY</a>
