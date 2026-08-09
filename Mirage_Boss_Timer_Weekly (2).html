@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mirage Boss Spawn Timer</title>
+    <!-- Supabase JS Client Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -255,7 +257,7 @@
 <div class="container">
     <header>
         <h1>🐉 Mirage Boss Spawn Timer</h1>
-        <p class="subtitle">Track boss spawn times and countdowns in real-time</p>
+        <p class="subtitle">Track boss spawn times and countdowns in real-time (Powered by Supabase)</p>
     </header>
 
     <div class="card">
@@ -310,10 +312,37 @@
 </div>
 
 <script>
-let bosses = JSON.parse(localStorage.getItem('bosses') || '[]');
+// --- SUPABASE CONFIGURATION ---
+const SUPABASE_URL = 'https://gaxxvcfoogwphytvluzb.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdheHh2Y2Zvb2d3cGh5dHZsdXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4MzY5MzEsImV4cCI6MjEwMDQxMjkzMX0.qVbiVwPyxj7dkeunCnwash3P-STKb1jf51VR2ZxfDJc';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-function save() {
-    localStorage.setItem('bosses', JSON.stringify(bosses));
+let bosses = [];
+
+// Fetch initial data from Supabase
+async function loadBosses() {
+    const { data, error } = await supabaseClient
+        .from('bosses')
+        .select('*')
+        .order('id', { ascending: true });
+
+    if (error) {
+        console.error('Error loading bosses from Supabase:', error);
+        return;
+    }
+
+    bosses = data || [];
+    render();
+}
+
+// Enable Realtime sync so all connected users see edits live
+function subscribeToRealtime() {
+    supabaseClient
+        .channel('public:bosses')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bosses' }, () => {
+            loadBosses();
+        })
+        .subscribe();
 }
 
 function getLastResetTimestamp() {
@@ -375,6 +404,11 @@ function render() {
         if (x.done && x.lastChecked && x.lastChecked < lastReset) {
             x.done = false;
             x.lastChecked = null;
+            // Background update to reset state in DB if week passed
+            supabaseClient
+                .from('bosses')
+                .update({ done: false, lastChecked: null })
+                .eq('id', x.id);
         }
 
         let r = tb.insertRow();
@@ -398,19 +432,29 @@ function render() {
         `;
     });
     
-    save();
     update();
 }
 
-function toggleDone(index, isChecked) {
-    bosses[index].done = isChecked;
-    bosses[index].lastChecked = isChecked ? Date.now() : null;
-    save();
-    
+async function toggleDone(index, isChecked) {
+    let boss = bosses[index];
+    let lastChecked = isChecked ? Date.now() : null;
+
+    boss.done = isChecked;
+    boss.lastChecked = lastChecked;
+
     let row = document.querySelector(`#tb tr[data-index="${index}"]`);
     if (row) {
         if (isChecked) row.classList.add('completed');
         else row.classList.remove('completed');
+    }
+
+    const { error } = await supabaseClient
+        .from('bosses')
+        .update({ done: isChecked, lastChecked: lastChecked })
+        .eq('id', boss.id);
+
+    if (error) {
+        console.error('Failed to update boss status:', error);
     }
 }
 
@@ -427,7 +471,7 @@ function escapeHtml(str) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function addBoss(e) {
+async function addBoss(e) {
     e.preventDefault();
     const bInput = document.getElementById('b');
     const wInput = document.getElementById('w');
@@ -448,16 +492,27 @@ function addBoss(e) {
         }
     });
 
-    bosses.push({
+    const newBoss = {
         b: bInput.value.trim(),
         w: wInput.value.trim(),
         l: lInput.value.trim(),
         times: vals.join(', '),
         done: false,
         lastChecked: null
-    });
+    };
 
-    save();
+    const { data, error } = await supabaseClient
+        .from('bosses')
+        .insert([newBoss])
+        .select();
+
+    if (error) {
+        console.error('Error adding boss:', error);
+        alert('Failed to save boss to Supabase.');
+        return;
+    }
+
+    bosses.push(data[0]);
     render();
 
     bInput.value = '';
@@ -466,33 +521,55 @@ function addBoss(e) {
     tInput.value = '';
 }
 
-function editBoss(i) {
+async function editBoss(i) {
     let x = bosses[i];
     let nb = prompt('Boss Name:', x.b); if (nb === null) return;
     let nw = prompt('World / Server:', x.w); if (nw === null) return;
     let nl = prompt('Location:', x.l); if (nl === null) return;
     let nt = prompt('Spawn Times (comma-separated):', x.times); if (nt === null) return;
 
-    bosses[i] = { 
-        ...bosses[i], 
-        b: nb.trim(), 
-        w: nw.trim(), 
-        l: nl.trim(), 
-        times: nt.trim() 
+    const updatedBoss = {
+        b: nb.trim(),
+        w: nw.trim(),
+        l: nl.trim(),
+        times: nt.trim()
     };
-    save();
+
+    const { error } = await supabaseClient
+        .from('bosses')
+        .update(updatedBoss)
+        .eq('id', x.id);
+
+    if (error) {
+        console.error('Error editing boss:', error);
+        alert('Failed to update boss in Supabase.');
+        return;
+    }
+
+    bosses[i] = { ...bosses[i], ...updatedBoss };
     render();
 }
 
-function delBoss(i) {
-    if (confirm(`Delete ${bosses[i].b}?`)) {
+async function delBoss(i) {
+    let x = bosses[i];
+    if (confirm(`Delete ${x.b}?`)) {
+        const { error } = await supabaseClient
+            .from('bosses')
+            .delete()
+            .eq('id', x.id);
+
+        if (error) {
+            console.error('Error deleting boss:', error);
+            alert('Failed to delete boss from Supabase.');
+            return;
+        }
+
         bosses.splice(i, 1);
-        save();
         render();
     }
 }
 
-function exportImportModal() {
+async function exportImportModal() {
     let action = prompt("Type 'export' to copy data JSON or 'import' to paste data JSON:", "export");
     if (!action) return;
 
@@ -504,15 +581,22 @@ function exportImportModal() {
             try {
                 let parsed = JSON.parse(jsonStr);
                 if (Array.isArray(parsed)) {
-                    bosses = parsed;
-                    save();
-                    render();
-                    alert("Boss list imported successfully!");
+                    // Upload array to Supabase
+                    const cleanData = parsed.map(({ id, created_at, ...rest }) => rest);
+                    const { data, error } = await supabaseClient
+                        .from('bosses')
+                        .insert(cleanData)
+                        .select();
+
+                    if (error) throw error;
+
+                    loadBosses();
+                    alert("Boss list imported successfully into Supabase!");
                 } else {
                     alert("Invalid data format.");
                 }
             } catch (err) {
-                alert("Failed to parse JSON: " + err.message);
+                alert("Failed to import to Supabase: " + err.message);
             }
         }
     }
@@ -575,7 +659,9 @@ function update() {
     rows.forEach(r => tb.appendChild(r));
 }
 
-render();
+// App Initialization
+loadBosses();
+subscribeToRealtime();
 setInterval(update, 1000);
 </script>
 
