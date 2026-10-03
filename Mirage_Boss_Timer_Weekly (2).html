@@ -36,7 +36,7 @@
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1100px;
             margin: 0 auto;
         }
 
@@ -195,6 +195,23 @@
             accent-color: var(--success);
         }
 
+        .schedule-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .time-badge {
+            background-color: #0f172a;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
         .cd {
             font-family: monospace;
             font-size: 1.1rem;
@@ -209,6 +226,7 @@
 
         .cd.due {
             color: var(--danger);
+            animation: pulse 0.6s infinite alternate;
         }
 
         @keyframes pulse {
@@ -299,6 +317,7 @@
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
+                    <th>All Spawn Times</th>
                     <th>Next Spawn</th>
                     <th>Countdown</th>
                     <th>Actions</th>
@@ -394,7 +413,7 @@ function render() {
     tb.innerHTML = '';
 
     if (bosses.length === 0) {
-        tb.innerHTML = `<tr><td colspan="7" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="8" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
         return;
     }
 
@@ -411,6 +430,14 @@ function render() {
                 .eq('id', x.id);
         }
 
+        // Format spawn times into visual badges
+        const timesBadges = (x.times || '')
+            .split(',')
+            .map(t => t.trim())
+            .filter(Boolean)
+            .map(t => `<span class="time-badge">${escapeHtml(t)}</span>`)
+            .join('');
+
         let r = tb.insertRow();
         r.dataset.index = i;
         r.dataset.times = x.times;
@@ -423,6 +450,7 @@ function render() {
             <td><strong>${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
+            <td><div class="schedule-tags">${timesBadges || '-'}</div></td>
             <td class="next">-</td>
             <td class="cd">-</td>
             <td class="actions">
@@ -605,6 +633,9 @@ async function exportImportModal() {
 function update() {
     let now = new Date();
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
+    
+    // 5 minutes allowance period (in milliseconds)
+    const ALLOWANCE_MS = 5 * 60 * 1000;
 
     rows.forEach(r => {
         let rawTimes = r.dataset.times.split(',');
@@ -621,30 +652,38 @@ function update() {
             return;
         }
 
-        let nextSpawn = dates.find(d => d > now);
+        // Find a spawn time that is in the future OR spawned within the last 5 minutes
+        let currentOrNextSpawn = dates.find(d => (d - now) > -ALLOWANCE_MS);
 
-        if (!nextSpawn) {
-            nextSpawn = new Date(dates[0]);
-            nextSpawn.setDate(nextSpawn.getDate() + 1);
+        if (!currentOrNextSpawn) {
+            // All spawns today have passed (+ 5 min allowance), look to tomorrow's first spawn
+            currentOrNextSpawn = new Date(dates[0]);
+            currentOrNextSpawn.setDate(currentOrNextSpawn.getDate() + 1);
         }
 
-        let diff = nextSpawn - now;
-        let H = Math.floor(diff / 36e5);
-        let M = Math.floor((diff % 36e5) / 6e4);
-        let S = Math.floor((diff % 6e4) / 1e3);
-
+        let diff = currentOrNextSpawn - now;
         const cdEl = r.querySelector('.cd');
-        cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
-        
-        if (diff <= 300000 && diff > 0) {
-            cdEl.className = 'cd imminent';
-        } else if (diff <= 0) {
+
+        if (diff <= 0 && diff >= -ALLOWANCE_MS) {
+            // Boss is active / within the 5-minute allowance window
+            cdEl.textContent = 'SPAWNED!';
             cdEl.className = 'cd due';
         } else {
-            cdEl.className = 'cd';
+            // Standard countdown display
+            let H = Math.floor(diff / 36e5);
+            let M = Math.floor((diff % 36e5) / 6e4);
+            let S = Math.floor((diff % 6e4) / 1e3);
+
+            cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
+
+            if (diff <= 300000 && diff > 0) {
+                cdEl.className = 'cd imminent'; // Pulsing orange within 5 mins before spawn
+            } else {
+                cdEl.className = 'cd';
+            }
         }
 
-        r.querySelector('.next').textContent = nextSpawn.toLocaleTimeString([], {
+        r.querySelector('.next').textContent = currentOrNextSpawn.toLocaleTimeString([], {
             hour: 'numeric',
             minute: '2-digit',
             second: '2-digit',
