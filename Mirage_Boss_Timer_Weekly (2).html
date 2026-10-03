@@ -245,7 +245,7 @@
         }
 
         .pin-btn {
-            font-size: 0.9rem; /* Smaller pin icon */
+            font-size: 0.9rem;
             color: var(--text-muted);
         }
 
@@ -543,6 +543,7 @@ function render() {
         let r = tb.insertRow();
         r.dataset.index = i;
         r.dataset.times = x.times;
+        r.dataset.done = x.done ? "true" : "false";
         if (x.done) r.classList.add('completed');
 
         r.innerHTML = `
@@ -612,6 +613,7 @@ async function toggleDone(index, isChecked) {
 
     let row = document.querySelector(`#tb tr[data-index="${index}"]`);
     if (row) {
+        row.dataset.done = isChecked ? "true" : "false";
         if (isChecked) row.classList.add('completed');
         else row.classList.remove('completed');
     }
@@ -624,6 +626,9 @@ async function toggleDone(index, isChecked) {
     if (error) {
         console.error('Failed to update boss status:', error);
     }
+    
+    // Re-sort table so completed item moves to the bottom immediately
+    update();
 }
 
 function searchBoss() {
@@ -855,14 +860,22 @@ function update() {
     const tb = document.getElementById('tb');
     
     rows.sort((a, b) => {
+        // Priority 1: Completed status goes to the bottom
+        let aDone = (a.dataset.done === "true") ? 1 : 0;
+        let bDone = (b.dataset.done === "true") ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone;
+
+        // Priority 2: Pinned items go to the top
         let aPinned = (a.dataset.isPinned === "true") ? 0 : 1;
         let bPinned = (b.dataset.isPinned === "true") ? 0 : 1;
         if (aPinned !== bPinned) return aPinned - bPinned;
 
+        // Priority 3: Favorite & Imminent
         let aFavImminent = (a.dataset.isFavorite === "true" && a.dataset.isImminent === "true") ? 0 : 1;
         let bFavImminent = (b.dataset.isFavorite === "true" && b.dataset.isImminent === "true") ? 0 : 1;
         if (aFavImminent !== bFavImminent) return aFavImminent - bFavImminent;
 
+        // Priority 4: Closest countdown time
         return Number(a.dataset.diff) - Number(b.dataset.diff);
     });
 
