@@ -61,6 +61,31 @@
             font-size: 0.95rem;
         }
 
+        .timezone-bar {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .tz-pill {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 6px 14px;
+            border-radius: 20px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tz-pill.active {
+            border-color: var(--accent);
+            color: var(--text-main);
+            background-color: rgba(56, 189, 248, 0.1);
+        }
+
         .card {
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -298,6 +323,11 @@
         <p class="subtitle">Track boss spawn times and countdowns in real-time (Powered by Supabase)</p>
     </header>
 
+    <div class="timezone-bar">
+        <div id="tz-asia" class="tz-pill active" onclick="setTimezone('asia')">🌏 Asia (UTC +8) [Main]</div>
+        <div id="tz-sa" class="tz-pill" onclick="setTimezone('sa')">🌎 South America (UTC -3)</div>
+    </div>
+
     <div class="card">
         <form id="bossForm" onsubmit="addBoss(event)">
             <div class="form-grid">
@@ -357,8 +387,15 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let bosses = [];
+let currentTz = 'asia'; // 'asia' (UTC+8) or 'sa' (UTC-3)
 
-// Fetch initial data from Supabase
+function setTimezone(tz) {
+    currentTz = tz;
+    document.getElementById('tz-asia').classList.toggle('active', tz === 'asia');
+    document.getElementById('tz-sa').classList.toggle('active', tz === 'sa');
+    render();
+}
+
 async function loadBosses() {
     const { data, error } = await supabaseClient
         .from('bosses')
@@ -374,7 +411,6 @@ async function loadBosses() {
     render();
 }
 
-// Enable Realtime sync so all connected users see edits live
 function subscribeToRealtime() {
     supabaseClient
         .channel('public:bosses')
@@ -404,7 +440,7 @@ function getLastResetTimestamp() {
     return lastResetGMT8.getTime() - (8 * 3600000) - (now.getTimezoneOffset() * 60000);
 }
 
-function parseTimeToToday(timeStr) {
+function parseTimeComponents(timeStr) {
     if (!timeStr) return null;
     let match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
     if (!match) return null;
@@ -423,9 +459,44 @@ function parseTimeToToday(timeStr) {
         if (period === 'AM' && hours === 12) hours = 0;
     }
 
-    let d = new Date();
-    d.setHours(hours, minutes, 0, 0);
-    return d;
+    return { hours, minutes };
+}
+
+function convertTimeString(timeStr) {
+    let comp = parseTimeComponents(timeStr);
+    if (!comp) return timeStr;
+
+    let targetOffset = (currentTz === 'sa') ? -3 : 8;
+    let hourShift = targetOffset - 8;
+    let totalMinutes = (comp.hours * 60 + comp.minutes + hourShift * 60) % 1440;
+    if (totalMinutes < 0) totalMinutes += 1440;
+
+    let newHours = Math.floor(totalMinutes / 60);
+    let newMins = totalMinutes % 60;
+    let newPeriod = 'AM';
+
+    if (newHours >= 12) {
+        newPeriod = 'PM';
+        if (newHours > 12) newHours -= 12;
+    }
+    if (newHours === 0) newHours = 12;
+
+    return `${newHours}:${String(newMins).padStart(2, '0')} ${newPeriod}`;
+}
+
+function formatUTCToTimezoneString(utcMs) {
+    let targetOffset = (currentTz === 'sa') ? -3 : 8;
+    let targetDate = new Date(utcMs + (targetOffset * 3600000));
+    
+    let hours = targetDate.getUTCHours();
+    let minutes = targetDate.getUTCMinutes();
+    let seconds = targetDate.getUTCSeconds();
+    let period = hours >= 12 ? 'PM' : 'AM';
+    
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} ${period}`;
 }
 
 function render() {
@@ -453,7 +524,7 @@ function render() {
             .split(',')
             .map(t => t.trim())
             .filter(Boolean)
-            .map(t => `<span class="time-badge">${escapeHtml(t)}</span>`)
+            .map(t => `<span class="time-badge">${escapeHtml(convertTimeString(t))}</span>`)
             .join('');
 
         let r = tb.insertRow();
@@ -669,22 +740,41 @@ async function exportImportModal() {
 }
 
 function update() {
-    let now = new Date();
+    let nowUtcMs = Date.now();
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
     
     const ALLOWANCE_MS = 5 * 60 * 1000;
+    // Determine active timezone offset in hours
+    let activeOffsetHours = (currentTz === 'sa') ? -3 : 8;
 
     rows.forEach(r => {
         let index = parseInt(r.dataset.index);
         let boss = bosses[index];
         let rawTimes = r.dataset.times.split(',');
         
-        let dates = rawTimes
-            .map(parseTimeToToday)
-            .filter(Boolean)
-            .sort((a, b) => a - b);
+        let now = new Date();
+        let utcTimestamps = [];
 
-        if (dates.length === 0) {
+        rawTimes.forEach(tStr => {
+            let comp = parseTimeComponents(tStr);
+            if (!comp) return;
+
+            // Generate timestamps relative to active timezone view
+            for (let dayOffset = -1; dayOffset <= 2; dayOffset++) {
+                let utcTime = Date.UTC(
+                    now.getUTCFullYear(),
+                    now.getUTCMonth(),
+                    now.getUTCDate() + dayOffset,
+                    comp.hours - activeOffsetHours,
+                    comp.minutes,
+                    0,
+                    0
+                );
+                utcTimestamps.push(utcTime);
+            }
+        });
+
+        if (utcTimestamps.length === 0) {
             r.querySelector('.next').textContent = 'Invalid Time';
             r.querySelector('.cd').textContent = '--:--:--';
             r.dataset.diff = 999999999999;
@@ -692,17 +782,18 @@ function update() {
             return;
         }
 
-        let currentOrNextSpawn = dates.find(d => (d - now) > -ALLOWANCE_MS);
+        let validSpawns = utcTimestamps
+            .filter(utcTime => (utcTime - nowUtcMs) >= -ALLOWANCE_MS)
+            .sort((a, b) => a - b);
 
-        if (!currentOrNextSpawn) {
-            currentOrNextSpawn = new Date(dates[0]);
-            currentOrNextSpawn.setDate(currentOrNextSpawn.getDate() + 1);
+        let nextSpawnUtc = validSpawns[0];
+        if (!nextSpawnUtc) {
+            nextSpawnUtc = utcTimestamps[0];
         }
 
-        let diff = currentOrNextSpawn - now;
+        let diff = nextSpawnUtc - nowUtcMs;
         const cdEl = r.querySelector('.cd');
 
-        // Flag if boss is imminent or active (less than or equal to 10 minutes away)
         let isImminent = (diff <= 600000 && diff >= -ALLOWANCE_MS);
         r.dataset.isImminent = isImminent ? "true" : "false";
         r.dataset.isFavorite = boss && boss.favorite ? "true" : "false";
@@ -711,9 +802,10 @@ function update() {
             cdEl.textContent = 'SPAWNED!';
             cdEl.className = 'cd due';
         } else {
-            let H = Math.floor(diff / 36e5);
-            let M = Math.floor((diff % 36e5) / 6e4);
-            let S = Math.floor((diff % 6e4) / 1e3);
+            let absDiff = Math.abs(diff);
+            let H = Math.floor(absDiff / 36e5);
+            let M = Math.floor((absDiff % 36e5) / 6e4);
+            let S = Math.floor((absDiff % 6e4) / 1e3);
 
             cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
 
@@ -724,21 +816,12 @@ function update() {
             }
         }
 
-        r.querySelector('.next').textContent = currentOrNextSpawn.toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-        });
-
+        r.querySelector('.next').textContent = formatUTCToTimezoneString(nextSpawnUtc);
         r.dataset.diff = diff;
     });
 
     const tb = document.getElementById('tb');
     
-    // Custom sort order: 
-    // 1. Favorites that are imminent/active spawn times move straight to the top.
-    // 2. Followed by standard closest countdown times.
     rows.sort((a, b) => {
         let aFavImminent = (a.dataset.isFavorite === "true" && a.dataset.isImminent === "true") ? 0 : 1;
         let bFavImminent = (b.dataset.isFavorite === "true" && b.dataset.isImminent === "true") ? 0 : 1;
