@@ -19,6 +19,7 @@
             --danger-hover: #dc2626;
             --warning: #f59e0b;
             --success: #10b981;
+            --star-color: #fbbf24;
         }
 
         * {
@@ -193,6 +194,25 @@
             height: 18px;
             cursor: pointer;
             accent-color: var(--success);
+        }
+
+        .fav-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            margin-right: 8px;
+            vertical-align: middle;
+            transition: transform 0.1s, color 0.2s;
+        }
+
+        .fav-btn:hover {
+            transform: scale(1.2);
+        }
+
+        .fav-btn.active {
+            color: var(--star-color);
         }
 
         .schedule-tags {
@@ -423,14 +443,12 @@ function render() {
         if (x.done && x.lastChecked && x.lastChecked < lastReset) {
             x.done = false;
             x.lastChecked = null;
-            // Background update to reset state in DB if week passed
             supabaseClient
                 .from('bosses')
                 .update({ done: false, lastChecked: null })
                 .eq('id', x.id);
         }
 
-        // Format spawn times into visual badges
         const timesBadges = (x.times || '')
             .split(',')
             .map(t => t.trim())
@@ -447,7 +465,12 @@ function render() {
             <td class="checkbox-cell">
                 <input type="checkbox" ${x.done ? 'checked' : ''} onchange="toggleDone(${i}, this.checked)">
             </td>
-            <td><strong>${escapeHtml(x.b)}</strong></td>
+            <td>
+                <button class="fav-btn ${x.favorite ? 'active' : ''}" onclick="toggleFavorite(${i})" title="Toggle Favorite">
+                    ${x.favorite ? '★' : '☆'}
+                </button>
+                <strong>${escapeHtml(x.b)}</strong>
+            </td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
             <td><div class="schedule-tags">${timesBadges || '-'}</div></td>
@@ -461,6 +484,21 @@ function render() {
     });
     
     update();
+}
+
+async function toggleFavorite(index) {
+    let boss = bosses[index];
+    boss.favorite = !boss.favorite;
+
+    const { error } = await supabaseClient
+        .from('bosses')
+        .update({ favorite: boss.favorite })
+        .eq('id', boss.id);
+
+    if (error) {
+        console.error('Failed to update favorite status:', error);
+    }
+    render();
 }
 
 async function toggleDone(index, isChecked) {
@@ -526,7 +564,8 @@ async function addBoss(e) {
         l: lInput.value.trim(),
         times: vals.join(', '),
         done: false,
-        lastChecked: null
+        lastChecked: null,
+        favorite: false
     };
 
     const { data, error } = await supabaseClient
@@ -609,7 +648,6 @@ async function exportImportModal() {
             try {
                 let parsed = JSON.parse(jsonStr);
                 if (Array.isArray(parsed)) {
-                    // Upload array to Supabase
                     const cleanData = parsed.map(({ id, created_at, ...rest }) => rest);
                     const { data, error } = await supabaseClient
                         .from('bosses')
@@ -634,10 +672,11 @@ function update() {
     let now = new Date();
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
     
-    // 5 minutes allowance period (in milliseconds)
     const ALLOWANCE_MS = 5 * 60 * 1000;
 
     rows.forEach(r => {
+        let index = parseInt(r.dataset.index);
+        let boss = bosses[index];
         let rawTimes = r.dataset.times.split(',');
         
         let dates = rawTimes
@@ -649,14 +688,13 @@ function update() {
             r.querySelector('.next').textContent = 'Invalid Time';
             r.querySelector('.cd').textContent = '--:--:--';
             r.dataset.diff = 999999999999;
+            r.dataset.isImminent = "false";
             return;
         }
 
-        // Find a spawn time that is in the future OR spawned within the last 5 minutes
         let currentOrNextSpawn = dates.find(d => (d - now) > -ALLOWANCE_MS);
 
         if (!currentOrNextSpawn) {
-            // All spawns today have passed (+ 5 min allowance), look to tomorrow's first spawn
             currentOrNextSpawn = new Date(dates[0]);
             currentOrNextSpawn.setDate(currentOrNextSpawn.getDate() + 1);
         }
@@ -664,12 +702,15 @@ function update() {
         let diff = currentOrNextSpawn - now;
         const cdEl = r.querySelector('.cd');
 
+        // Flag if boss is imminent or active (less than or equal to 10 minutes away)
+        let isImminent = (diff <= 600000 && diff >= -ALLOWANCE_MS);
+        r.dataset.isImminent = isImminent ? "true" : "false";
+        r.dataset.isFavorite = boss && boss.favorite ? "true" : "false";
+
         if (diff <= 0 && diff >= -ALLOWANCE_MS) {
-            // Boss is active / within the 5-minute allowance window
             cdEl.textContent = 'SPAWNED!';
             cdEl.className = 'cd due';
         } else {
-            // Standard countdown display
             let H = Math.floor(diff / 36e5);
             let M = Math.floor((diff % 36e5) / 6e4);
             let S = Math.floor((diff % 6e4) / 1e3);
@@ -677,7 +718,7 @@ function update() {
             cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
 
             if (diff <= 300000 && diff > 0) {
-                cdEl.className = 'cd imminent'; // Pulsing orange within 5 mins before spawn
+                cdEl.className = 'cd imminent';
             } else {
                 cdEl.className = 'cd';
             }
@@ -694,7 +735,20 @@ function update() {
     });
 
     const tb = document.getElementById('tb');
-    rows.sort((a, b) => Number(a.dataset.diff) - Number(b.dataset.diff));
+    
+    // Custom sort order: 
+    // 1. Favorites that are imminent/active spawn times move straight to the top.
+    // 2. Followed by standard closest countdown times.
+    rows.sort((a, b) => {
+        let aFavImminent = (a.dataset.isFavorite === "true" && a.dataset.isImminent === "true") ? 0 : 1;
+        let bFavImminent = (b.dataset.isFavorite === "true" && b.dataset.isImminent === "true") ? 0 : 1;
+
+        if (aFavImminent !== bFavImminent) {
+            return aFavImminent - bFavImminent;
+        }
+        return Number(a.dataset.diff) - Number(b.dataset.diff);
+    });
+
     rows.forEach(r => tb.appendChild(r));
 }
 
