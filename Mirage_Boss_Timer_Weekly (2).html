@@ -20,6 +20,7 @@
             --warning: #f59e0b;
             --success: #10b981;
             --star-color: #fbbf24;
+            --pin-color: #ec4899;
         }
 
         * {
@@ -221,23 +222,35 @@
             accent-color: var(--success);
         }
 
-        .fav-btn {
+        .icon-btn {
             background: none;
             border: none;
             cursor: pointer;
-            font-size: 1.2rem;
-            color: var(--text-muted);
-            margin-right: 8px;
             vertical-align: middle;
             transition: transform 0.1s, color 0.2s;
+            margin-right: 2px;
         }
 
-        .fav-btn:hover {
-            transform: scale(1.2);
+        .icon-btn:hover {
+            transform: scale(1.15);
+        }
+
+        .fav-btn {
+            font-size: 1.1rem;
+            color: var(--text-muted);
         }
 
         .fav-btn.active {
             color: var(--star-color);
+        }
+
+        .pin-btn {
+            font-size: 0.9rem; /* Smaller pin icon */
+            color: var(--text-muted);
+        }
+
+        .pin-btn.active {
+            color: var(--pin-color);
         }
 
         .schedule-tags {
@@ -537,8 +550,11 @@ function render() {
                 <input type="checkbox" ${x.done ? 'checked' : ''} onchange="toggleDone(${i}, this.checked)">
             </td>
             <td>
-                <button class="fav-btn ${x.favorite ? 'active' : ''}" onclick="toggleFavorite(${i})" title="Toggle Favorite">
+                <button class="icon-btn fav-btn ${x.favorite ? 'active' : ''}" onclick="toggleFavorite(${i})" title="Toggle Favorite">
                     ${x.favorite ? '★' : '☆'}
+                </button>
+                <button class="icon-btn pin-btn ${x.pinned ? 'active' : ''}" onclick="togglePin(${i})" title="Pin to Top">
+                    📌
                 </button>
                 <strong>${escapeHtml(x.b)}</strong>
             </td>
@@ -568,6 +584,21 @@ async function toggleFavorite(index) {
 
     if (error) {
         console.error('Failed to update favorite status:', error);
+    }
+    render();
+}
+
+async function togglePin(index) {
+    let boss = bosses[index];
+    boss.pinned = !boss.pinned;
+
+    const { error } = await supabaseClient
+        .from('bosses')
+        .update({ pinned: boss.pinned })
+        .eq('id', boss.id);
+
+    if (error) {
+        console.error('Failed to update pinned status:', error);
     }
     render();
 }
@@ -636,7 +667,8 @@ async function addBoss(e) {
         times: vals.join(', '),
         done: false,
         lastChecked: null,
-        favorite: false
+        favorite: false,
+        pinned: false
     };
 
     const { data, error } = await supabaseClient
@@ -744,7 +776,6 @@ function update() {
     let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
     
     const ALLOWANCE_MS = 5 * 60 * 1000;
-    // Determine active timezone offset in hours
     let activeOffsetHours = (currentTz === 'sa') ? -3 : 8;
 
     rows.forEach(r => {
@@ -759,7 +790,6 @@ function update() {
             let comp = parseTimeComponents(tStr);
             if (!comp) return;
 
-            // Generate timestamps relative to active timezone view
             for (let dayOffset = -1; dayOffset <= 2; dayOffset++) {
                 let utcTime = Date.UTC(
                     now.getUTCFullYear(),
@@ -779,6 +809,7 @@ function update() {
             r.querySelector('.cd').textContent = '--:--:--';
             r.dataset.diff = 999999999999;
             r.dataset.isImminent = "false";
+            r.dataset.isPinned = "false";
             return;
         }
 
@@ -797,6 +828,7 @@ function update() {
         let isImminent = (diff <= 600000 && diff >= -ALLOWANCE_MS);
         r.dataset.isImminent = isImminent ? "true" : "false";
         r.dataset.isFavorite = boss && boss.favorite ? "true" : "false";
+        r.dataset.isPinned = boss && boss.pinned ? "true" : "false";
 
         if (diff <= 0 && diff >= -ALLOWANCE_MS) {
             cdEl.textContent = 'SPAWNED!';
@@ -823,12 +855,14 @@ function update() {
     const tb = document.getElementById('tb');
     
     rows.sort((a, b) => {
+        let aPinned = (a.dataset.isPinned === "true") ? 0 : 1;
+        let bPinned = (b.dataset.isPinned === "true") ? 0 : 1;
+        if (aPinned !== bPinned) return aPinned - bPinned;
+
         let aFavImminent = (a.dataset.isFavorite === "true" && a.dataset.isImminent === "true") ? 0 : 1;
         let bFavImminent = (b.dataset.isFavorite === "true" && b.dataset.isImminent === "true") ? 0 : 1;
+        if (aFavImminent !== bFavImminent) return aFavImminent - bFavImminent;
 
-        if (aFavImminent !== bFavImminent) {
-            return aFavImminent - bFavImminent;
-        }
         return Number(a.dataset.diff) - Number(b.dataset.diff);
     });
 
