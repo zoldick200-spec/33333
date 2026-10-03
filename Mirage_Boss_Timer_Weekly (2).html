@@ -19,7 +19,6 @@
             --danger-hover: #dc2626;
             --warning: #f59e0b;
             --success: #10b981;
-            --star-color: #eab308;
         }
 
         * {
@@ -37,12 +36,12 @@
         }
 
         .container {
-            max-width: 1150px;
+            max-width: 1000px;
             margin: 0 auto;
         }
 
         header {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             text-align: center;
         }
 
@@ -59,34 +58,6 @@
         p.subtitle {
             color: var(--text-muted);
             font-size: 0.95rem;
-        }
-
-        .timezone-bar {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
-            background-color: var(--card-bg);
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-        }
-
-        .timezone-bar label {
-            font-size: 0.9rem;
-            color: var(--text-main);
-        }
-
-        .timezone-bar select {
-            background-color: #0f172a;
-            border: 1px solid var(--border-color);
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 0.9rem;
-            outline: none;
-            cursor: pointer;
         }
 
         .card {
@@ -213,7 +184,7 @@
             opacity: 0.5;
         }
 
-        .checkbox-cell, .star-cell {
+        .checkbox-cell {
             text-align: center;
         }
 
@@ -222,40 +193,6 @@
             height: 18px;
             cursor: pointer;
             accent-color: var(--success);
-        }
-
-        .star-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 1.2rem;
-            color: var(--text-muted);
-            transition: transform 0.1s, color 0.2s;
-        }
-
-        .star-btn:hover {
-            transform: scale(1.2);
-        }
-
-        .star-btn.favorited {
-            color: var(--star-color);
-        }
-
-        .schedule-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-        }
-
-        .time-badge {
-            background-color: #0f172a;
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            white-space: nowrap;
         }
 
         .cd {
@@ -272,7 +209,6 @@
 
         .cd.due {
             color: var(--danger);
-            animation: pulse 0.6s infinite alternate;
         }
 
         @keyframes pulse {
@@ -324,15 +260,6 @@
         <p class="subtitle">Track boss spawn times and countdowns in real-time (Powered by Supabase)</p>
     </header>
 
-    <!-- Timezone Selection Bar -->
-    <div class="timezone-bar">
-        <label for="tzSelect">🌐 Target Timezone:</label>
-        <select id="tzSelect" onchange="changeTimezone()">
-            <option value="8">Asia (UTC +8)</option>
-            <option value="-3">South America (UTC -3)</option>
-        </select>
-    </div>
-
     <div class="card">
         <form id="bossForm" onsubmit="addBoss(event)">
             <div class="form-grid">
@@ -350,7 +277,7 @@
                 </div>
                 <div class="form-group">
                     <label for="t">Spawn Times (Comma separated)</label>
-                    <input id="t" placeholder="e.g. 14:00, 20:30" required>
+                    <input id="t" placeholder="e.g. 2:00 PM, 8:00 PM" required>
                 </div>
             </div>
             <div class="btn-group">
@@ -368,12 +295,10 @@
         <table>
             <thead>
                 <tr>
-                    <th style="text-align: center;">⭐</th>
                     <th style="text-align: center;">Done</th>
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
-                    <th>All Spawn Times (Selected TZ)</th>
                     <th>Next Spawn</th>
                     <th>Countdown</th>
                     <th>Actions</th>
@@ -383,7 +308,7 @@
             </tbody>
         </table>
     </div>
-    <div class="reset-info">💡 Checkbox auto-resets every Sunday at 23:00 GMT+8</div>
+    <div class="reset-info">💡 Checkbox auto-resets every Sunday at 11:00 PM GMT+8</div>
 </div>
 
 <script>
@@ -393,14 +318,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let bosses = [];
-let currentOffset = 8; // Default to UTC +8 (Asia)
 
-function changeTimezone() {
-    const select = document.getElementById('tzSelect');
-    currentOffset = parseInt(select.value, 10);
-    render();
-}
-
+// Fetch initial data from Supabase
 async function loadBosses() {
     const { data, error } = await supabaseClient
         .from('bosses')
@@ -416,6 +335,7 @@ async function loadBosses() {
     render();
 }
 
+// Enable Realtime sync so all connected users see edits live
 function subscribeToRealtime() {
     supabaseClient
         .channel('public:bosses')
@@ -445,12 +365,12 @@ function getLastResetTimestamp() {
     return lastResetGMT8.getTime() - (8 * 3600000) - (now.getTimezoneOffset() * 60000);
 }
 
-function parseTimeToTargetTZ(timeStr, targetOffsetHours) {
+function parseTimeToToday(timeStr) {
     if (!timeStr) return null;
-    let match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+    let match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
     if (!match) return null;
 
-    let [, hoursStr, minutesStr] = match;
+    let [, hoursStr, minutesStr, period] = match;
     let hours = parseInt(hoursStr, 10);
     let minutes = parseInt(minutesStr, 10);
 
@@ -458,20 +378,15 @@ function parseTimeToTargetTZ(timeStr, targetOffsetHours) {
         return null;
     }
 
-    let baseDate = new Date();
-    baseDate.setUTCHours(hours - 8, minutes, 0, 0);
+    if (period) {
+        period = period.toUpperCase();
+        if (period === 'PM' && hours < 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+    }
 
-    let targetDate = new Date(baseDate.getTime() + (targetOffsetHours * 3600000));
-    return targetDate;
-}
-
-function formatTimeInTargetTZ(dateObj, targetOffsetHours) {
-    let shifted = new Date(dateObj.getTime() + ((targetOffsetHours - 8) * 3600000));
-    let hours = shifted.getUTCHours();
-    let minutes = shifted.getUTCMinutes();
-    let formattedHours = String(hours).padStart(2, '0');
-    let formattedMinutes = String(minutes).padStart(2, '0');
-    return `${formattedHours}:${formattedMinutes}`;
+    let d = new Date();
+    d.setHours(hours, minutes, 0, 0);
+    return d;
 }
 
 function render() {
@@ -479,7 +394,7 @@ function render() {
     tb.innerHTML = '';
 
     if (bosses.length === 0) {
-        tb.innerHTML = `<tr><td colspan="9" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="7" class="empty-state">No bosses added yet. Add one using the form above!</td></tr>`;
         return;
     }
 
@@ -489,47 +404,25 @@ function render() {
         if (x.done && x.lastChecked && x.lastChecked < lastReset) {
             x.done = false;
             x.lastChecked = null;
+            // Background update to reset state in DB if week passed
             supabaseClient
                 .from('bosses')
                 .update({ done: false, lastChecked: null })
                 .eq('id', x.id);
         }
-    });
-
-    bosses.forEach((x, i) => {
-        let convertedTimesArray = (x.times || '')
-            .split(',')
-            .map(t => t.trim())
-            .filter(Boolean)
-            .map(t => {
-                let parsedDate = parseTimeToTargetTZ(t, currentOffset);
-                return parsedDate ? formatTimeInTargetTZ(parsedDate, currentOffset) : t;
-            });
-
-        const timesBadges = convertedTimesArray
-            .map(t => `<span class="time-badge">${escapeHtml(t)}</span>`)
-            .join('');
 
         let r = tb.insertRow();
         r.dataset.index = i;
-        r.dataset.id = x.id;
-        r.dataset.rawtimes = x.times;
-        r.dataset.favorite = x.favorite ? 'true' : 'false';
+        r.dataset.times = x.times;
         if (x.done) r.classList.add('completed');
 
         r.innerHTML = `
-            <td class="star-cell">
-                <button class="star-btn ${x.favorite ? 'favorited' : ''}" onclick="toggleFavorite(${i}, this)">
-                    ${x.favorite ? '★' : '☆'}
-                </button>
-            </td>
             <td class="checkbox-cell">
                 <input type="checkbox" ${x.done ? 'checked' : ''} onchange="toggleDone(${i}, this.checked)">
             </td>
             <td><strong>${escapeHtml(x.b)}</strong></td>
             <td>${escapeHtml(x.w)}</td>
             <td>${escapeHtml(x.l)}</td>
-            <td><div class="schedule-tags">${timesBadges || '-'}</div></td>
             <td class="next">-</td>
             <td class="cd">-</td>
             <td class="actions">
@@ -540,35 +433,6 @@ function render() {
     });
     
     update();
-}
-
-async function toggleFavorite(index, btnElement) {
-    let boss = bosses[index];
-    boss.favorite = !boss.favorite;
-
-    if (boss.favorite) {
-        btnElement.textContent = '★';
-        btnElement.classList.add('favorited');
-    } else {
-        btnElement.textContent = '☆';
-        btnElement.classList.remove('favorited');
-    }
-
-    let row = document.querySelector(`#tb tr[data-index="${index}"]`);
-    if (row) {
-        row.dataset.favorite = boss.favorite ? 'true' : 'false';
-    }
-
-    const { error } = await supabaseClient
-        .from('bosses')
-        .update({ favorite: boss.favorite })
-        .eq('id', boss.id);
-
-    if (error) {
-        console.error('Failed to update favorite status:', error);
-    } else {
-        update();
-    }
 }
 
 async function toggleDone(index, isChecked) {
@@ -620,7 +484,12 @@ async function addBoss(e) {
     rawVals.forEach(v => {
         v = v.trim();
         if (!v) return;
-        vals.push(v);
+        if (/am|pm/i.test(v)) {
+            vals.push(v);
+        } else {
+            vals.push(v + ' AM');
+            vals.push(v + ' PM');
+        }
     });
 
     const newBoss = {
@@ -629,7 +498,6 @@ async function addBoss(e) {
         l: lInput.value.trim(),
         times: vals.join(', '),
         done: false,
-        favorite: false,
         lastChecked: null
     };
 
@@ -658,7 +526,7 @@ async function editBoss(i) {
     let nb = prompt('Boss Name:', x.b); if (nb === null) return;
     let nw = prompt('World / Server:', x.w); if (nw === null) return;
     let nl = prompt('Location:', x.l); if (nl === null) return;
-    let nt = prompt('Spawn Times (comma-separated, 24hr format e.g. 14:00):', x.times); if (nt === null) return;
+    let nt = prompt('Spawn Times (comma-separated):', x.times); if (nt === null) return;
 
     const updatedBoss = {
         b: nb.trim(),
@@ -713,6 +581,7 @@ async function exportImportModal() {
             try {
                 let parsed = JSON.parse(jsonStr);
                 if (Array.isArray(parsed)) {
+                    // Upload array to Supabase
                     const cleanData = parsed.map(({ id, created_at, ...rest }) => rest);
                     const { data, error } = await supabaseClient
                         .from('bosses')
@@ -735,16 +604,13 @@ async function exportImportModal() {
 
 function update() {
     let now = new Date();
-    let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.rawtimes);
-    
-    const ALLOWANCE_MS = 5 * 60 * 1000;
-    const IMMINENT_MS = 15 * 60 * 1000;
+    let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
 
     rows.forEach(r => {
-        let rawTimes = r.dataset.rawtimes.split(',');
+        let rawTimes = r.dataset.times.split(',');
         
         let dates = rawTimes
-            .map(t => parseTimeToTargetTZ(t, currentOffset))
+            .map(parseTimeToToday)
             .filter(Boolean)
             .sort((a, b) => a - b);
 
@@ -755,64 +621,41 @@ function update() {
             return;
         }
 
-        let currentOrNextSpawn = dates.find(d => (d - now) > -ALLOWANCE_MS);
+        let nextSpawn = dates.find(d => d > now);
 
-        if (!currentOrNextSpawn) {
-            currentOrNextSpawn = new Date(dates[0]);
-            currentOrNextSpawn.setDate(currentOrNextSpawn.getDate() + 1);
+        if (!nextSpawn) {
+            nextSpawn = new Date(dates[0]);
+            nextSpawn.setDate(nextSpawn.getDate() + 1);
         }
 
-        let diff = currentOrNextSpawn - now;
-        const cdEl = r.querySelector('.cd');
+        let diff = nextSpawn - now;
+        let H = Math.floor(diff / 36e5);
+        let M = Math.floor((diff % 36e5) / 6e4);
+        let S = Math.floor((diff % 6e4) / 1e3);
 
-        if (diff <= 0 && diff >= -ALLOWANCE_MS) {
-            cdEl.textContent = 'SPAWNED!';
+        const cdEl = r.querySelector('.cd');
+        cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
+        
+        if (diff <= 300000 && diff > 0) {
+            cdEl.className = 'cd imminent';
+        } else if (diff <= 0) {
             cdEl.className = 'cd due';
         } else {
-            let H = Math.floor(diff / 36e5);
-            let M = Math.floor((diff % 36e5) / 6e4);
-            let S = Math.floor((diff % 6e4) / 1e3);
-
-            cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
-
-            if (diff <= 300000 && diff > 0) {
-                cdEl.className = 'cd imminent';
-            } else {
-                cdEl.className = 'cd';
-            }
+            cdEl.className = 'cd';
         }
 
-        r.querySelector('.next').textContent = currentOrNextSpawn.toLocaleTimeString([], {
-            hour: '2-digit',
+        r.querySelector('.next').textContent = nextSpawn.toLocaleTimeString([], {
+            hour: 'numeric',
             minute: '2-digit',
             second: '2-digit',
-            hour12: false
+            hour12: true
         });
 
         r.dataset.diff = diff;
     });
 
     const tb = document.getElementById('tb');
-    
-    rows.sort((a, b) => {
-        let aDiff = Number(a.dataset.diff);
-        let bDiff = Number(b.dataset.diff);
-        let aFav = a.dataset.favorite === 'true';
-        let bFav = b.dataset.favorite === 'true';
-
-        let aIsImminent = aDiff <= IMMINENT_MS && aDiff >= -ALLOWANCE_MS;
-        let bIsImminent = bDiff <= IMMINENT_MS && bDiff >= -ALLOWANCE_MS;
-
-        let aTopPriority = (aFav && aIsImminent) ? 1 : 0;
-        let bTopPriority = (bFav && bIsImminent) ? 1 : 0;
-
-        if (aTopPriority !== bTopPriority) {
-            return bTopPriority - aTopPriority;
-        }
-
-        return aDiff - bDiff;
-    });
-
+    rows.sort((a, b) => Number(a.dataset.diff) - Number(b.dataset.diff));
     rows.forEach(r => tb.appendChild(r));
 }
 
