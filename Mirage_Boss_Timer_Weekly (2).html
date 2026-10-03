@@ -41,7 +41,7 @@
         }
 
         header {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
             text-align: center;
         }
 
@@ -58,6 +58,34 @@
         p.subtitle {
             color: var(--text-muted);
             font-size: 0.95rem;
+        }
+
+        .timezone-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            background-color: var(--card-bg);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .timezone-bar label {
+            font-size: 0.9rem;
+            color: var(--text-main);
+        }
+
+        .timezone-bar select {
+            background-color: #0f172a;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            outline: none;
+            cursor: pointer;
         }
 
         .card {
@@ -278,6 +306,15 @@
         <p class="subtitle">Track boss spawn times and countdowns in real-time (Powered by Supabase)</p>
     </header>
 
+    <!-- Timezone Selection Bar -->
+    <div class="timezone-bar">
+        <label for="tzSelect">🌐 Target Timezone:</label>
+        <select id="tzSelect" onchange="changeTimezone()">
+            <option value="8">Asia (UTC +8)</option>
+            <option value="-3">South America (UTC -3)</option>
+        </select>
+    </div>
+
     <div class="card">
         <form id="bossForm" onsubmit="addBoss(event)">
             <div class="form-grid">
@@ -317,7 +354,7 @@
                     <th>Boss</th>
                     <th>World</th>
                     <th>Location</th>
-                    <th>All Spawn Times</th>
+                    <th>All Spawn Times (Selected TZ)</th>
                     <th>Next Spawn</th>
                     <th>Countdown</th>
                     <th>Actions</th>
@@ -337,6 +374,13 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let bosses = [];
+let currentOffset = 8; // Default to UTC +8 (Asia)
+
+function changeTimezone() {
+    const select = document.getElementById('tzSelect');
+    currentOffset = parseInt(select.value, 10);
+    render(); // Re-render table with converted times
+}
 
 // Fetch initial data from Supabase
 async function loadBosses() {
@@ -384,7 +428,8 @@ function getLastResetTimestamp() {
     return lastResetGMT8.getTime() - (8 * 3600000) - (now.getTimezoneOffset() * 60000);
 }
 
-function parseTimeToToday(timeStr) {
+// Parses base time assuming it's written in UTC+8, then shifts it to target currentOffset
+function parseTimeToTargetTZ(timeStr, targetOffsetHours) {
     if (!timeStr) return null;
     let match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
     if (!match) return null;
@@ -403,9 +448,23 @@ function parseTimeToToday(timeStr) {
         if (period === 'AM' && hours === 12) hours = 0;
     }
 
-    let d = new Date();
-    d.setHours(hours, minutes, 0, 0);
-    return d;
+    // Base time is assumed to be in UTC +8
+    let baseDate = new Date();
+    baseDate.setUTCHours(hours - 8, minutes, 0, 0); // Convert UTC+8 baseline to pure UTC
+
+    // Apply target offset
+    let targetDate = new Date(baseDate.getTime() + (targetOffsetHours * 3600000));
+    return targetDate;
+}
+
+function formatTimeInTargetTZ(dateObj, targetOffsetHours) {
+    let shifted = new Date(dateObj.getTime() + ((targetOffsetHours - 8) * 3600000));
+    let hours = shifted.getUTCHours();
+    let minutes = shifted.getUTCMinutes();
+    let period = hours >= 12 ? 'PM' : 'AM';
+    let formattedHours = hours % 12 || 12;
+    let formattedMinutes = String(minutes).padStart(2, '0');
+    return `${formattedHours}:${formattedMinutes} ${period}`;
 }
 
 function render() {
@@ -423,24 +482,29 @@ function render() {
         if (x.done && x.lastChecked && x.lastChecked < lastReset) {
             x.done = false;
             x.lastChecked = null;
-            // Background update to reset state in DB if week passed
             supabaseClient
                 .from('bosses')
                 .update({ done: false, lastChecked: null })
                 .eq('id', x.id);
         }
 
-        // Format spawn times into visual badges
-        const timesBadges = (x.times || '')
+        // Convert times based on current selected offset
+        let convertedTimesArray = (x.times || '')
             .split(',')
             .map(t => t.trim())
             .filter(Boolean)
+            .map(t => {
+                let parsedDate = parseTimeToTargetTZ(t, currentOffset);
+                return parsedDate ? formatTimeInTargetTZ(parsedDate, currentOffset) : t;
+            });
+
+        const timesBadges = convertedTimesArray
             .map(t => `<span class="time-badge">${escapeHtml(t)}</span>`)
             .join('');
 
         let r = tb.insertRow();
         r.dataset.index = i;
-        r.dataset.times = x.times;
+        r.dataset.rawtimes = x.times; // Keep original stored strings
         if (x.done) r.classList.add('completed');
 
         r.innerHTML = `
@@ -609,7 +673,6 @@ async function exportImportModal() {
             try {
                 let parsed = JSON.parse(jsonStr);
                 if (Array.isArray(parsed)) {
-                    // Upload array to Supabase
                     const cleanData = parsed.map(({ id, created_at, ...rest }) => rest);
                     const { data, error } = await supabaseClient
                         .from('bosses')
@@ -632,16 +695,15 @@ async function exportImportModal() {
 
 function update() {
     let now = new Date();
-    let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.times);
+    let rows = [...document.querySelectorAll('#tb tr')].filter(r => r.dataset.rawtimes);
     
-    // 5 minutes allowance period (in milliseconds)
     const ALLOWANCE_MS = 5 * 60 * 1000;
 
     rows.forEach(r => {
-        let rawTimes = r.dataset.times.split(',');
+        let rawTimes = r.dataset.rawtimes.split(',');
         
         let dates = rawTimes
-            .map(parseTimeToToday)
+            .map(t => parseTimeToTargetTZ(t, currentOffset))
             .filter(Boolean)
             .sort((a, b) => a - b);
 
@@ -652,11 +714,9 @@ function update() {
             return;
         }
 
-        // Find a spawn time that is in the future OR spawned within the last 5 minutes
         let currentOrNextSpawn = dates.find(d => (d - now) > -ALLOWANCE_MS);
 
         if (!currentOrNextSpawn) {
-            // All spawns today have passed (+ 5 min allowance), look to tomorrow's first spawn
             currentOrNextSpawn = new Date(dates[0]);
             currentOrNextSpawn.setDate(currentOrNextSpawn.getDate() + 1);
         }
@@ -665,11 +725,9 @@ function update() {
         const cdEl = r.querySelector('.cd');
 
         if (diff <= 0 && diff >= -ALLOWANCE_MS) {
-            // Boss is active / within the 5-minute allowance window
             cdEl.textContent = 'SPAWNED!';
             cdEl.className = 'cd due';
         } else {
-            // Standard countdown display
             let H = Math.floor(diff / 36e5);
             let M = Math.floor((diff % 36e5) / 6e4);
             let S = Math.floor((diff % 6e4) / 1e3);
@@ -677,7 +735,7 @@ function update() {
             cdEl.textContent = `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}:${String(S).padStart(2, '0')}`;
 
             if (diff <= 300000 && diff > 0) {
-                cdEl.className = 'cd imminent'; // Pulsing orange within 5 mins before spawn
+                cdEl.className = 'cd imminent';
             } else {
                 cdEl.className = 'cd';
             }
